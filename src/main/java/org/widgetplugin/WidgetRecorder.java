@@ -66,5 +66,4 @@ public class WidgetRecorder extends Recorder{
     public final BuildStepMonitor getRequiredMonitorService() {
         return BuildStepMonitor.NONE;
     }
-	
 }
