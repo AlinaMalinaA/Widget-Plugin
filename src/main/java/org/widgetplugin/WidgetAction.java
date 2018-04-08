@@ -1,21 +1,22 @@
 package org.widgetplugin;
 
+import hudson.util.RunList;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map.Entry;
-import org.apache.commons.lang.StringUtils;
 import org.apache.http.client.ClientProtocolException;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClientBuilder;
-import org.apache.http.util.EntityUtils;
 import org.kohsuke.stapler.Stapler;
 
+import hudson.model.AbstractBuild;
 import hudson.model.Action;
+import hudson.model.Hudson;
+import hudson.model.Item;
+import hudson.model.Job;
 
 //На уровне сервера  список джобов которые чаще всего ломаются 
 //то есть получение всех сломанных билдов, сортировка по имени джобы, взять первые три джобы (или джобы с поломами больше двух)
@@ -25,9 +26,8 @@ import hudson.model.Action;
 
 public final class WidgetAction implements Action {
 
-	private static final String USERNAME = "Alena"; //логин
-	private static final String PASSWORD = "b96bebd02ee08eb7c7f5b51e2d154baf";//сюда вставлять свой токен
-	private static String HOST = "";//
+	static int NUMBER_OF_BUILDS_TO_CHECK_TO_DISPLAY_THE_NUMBER_OF_FAILS_ON_MAIN_PAGE = 10;
+	static int NUMBER_OF_BUILDS_TO_DISPLAY_ON_JOB_PAGE = 5;
 	
 	//возвращает имя плагина
     public String getDisplayName() {
@@ -45,67 +45,48 @@ public final class WidgetAction implements Action {
     }
     
     
-    
-    
-    //делает запрос на сервер
-    //принимает часть юрл-строки после локального адреса дженкинс для обращения по ней
-    //возвращает тело ответа
-    public static String doGet(String URL) throws ClientProtocolException, IOException {
-    	CloseableHttpClient httpclient = HttpClientBuilder.create().build();
-	    String encoding = Base64.getEncoder().encodeToString((USERNAME +":" + PASSWORD).getBytes());
-    	
-    	HttpGet httpget = new HttpGet(HOST+URL);
-    	httpget.setHeader("Authorization", "Basic " + encoding);
-
-    	String response = EntityUtils.toString(httpclient.execute(httpget).getEntity());
-
-    	httpclient.close();
-    	
-    	return response;
-    }
-    
-
     //извлекает следующую информацию из ответа сервера: 
     //имя проекта, содержащего неудачные сборки
     //и количество неудачных сборок
     public static void makeServerInfo() {
+    	System.out.println("========================");
     	//карта для хранения имени проекта и количества неудачных сборок
     	HashMap<String, Integer> hashMap = new HashMap<String, Integer>();
-	    String responseBody;
-	    String Name;
-		try {
-			responseBody = doGet("rssFailed");
-			//String temp = responseBody;
-		    int ind = responseBody.indexOf("y><title"); 
-		    int count2 = StringUtils.countMatches(responseBody, "y><title>");//количество вхождений 
-		    for (int i = 0; i<count2; i++) {
-		    	responseBody = responseBody.substring(ind+9); 
-			    ind = responseBody.indexOf("#"); 
-			    Name = responseBody.substring(0, ind).trim();
-			    if (hashMap.containsKey(Name)){
-			    	hashMap.put(Name, hashMap.get(Name)+1);
-			    }
-			    else {
-			    	hashMap.put(Name, 1);
-			    }
-			    
-			    responseBody = responseBody.substring(ind+1); 
-			    ind = responseBody.indexOf(" "); 
-			    ind = responseBody.indexOf("y><title"); 
-		    }
-		    //передает карту методу, который сформирует из нее таблицу для отображения на главной странице
-		    createServerFile(hashMap);
-		    
-	    	
-		} catch (ClientProtocolException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-	    
     	
+    	Hudson hudson = Hudson.getInstance();
+    	
+    	List<Item> allJobs = hudson.getAllItems();
+    	System.out.println("0)  "+allJobs.size());
+    	Job<?, ?> job = null;
+    	int count = 0;
+    	int M = 0;
+    	for (int i = 0; i < allJobs.size(); i++) {
+    		job = (Job<?, ?>) allJobs.get(i);
+    		System.out.println(i+")  "+job.getName());
+    		try {
+    			System.out.println("number last fail "+job.getLastFailedBuild().getNumber());
+        		if (job.getLastFailedBuild().getNumber()>NUMBER_OF_BUILDS_TO_CHECK_TO_DISPLAY_THE_NUMBER_OF_FAILS_ON_MAIN_PAGE) {M=job.getLastFailedBuild().getNumber()-NUMBER_OF_BUILDS_TO_CHECK_TO_DISPLAY_THE_NUMBER_OF_FAILS_ON_MAIN_PAGE;}
+        		else {M=1;}
+        		for (int j = M; j<job.getLastFailedBuild().getNumber(); j++){
+        			System.out.println("result "+job.getBuildByNumber(j).getResult());
+        			if (job.getBuildByNumber(j).getResult().toString().trim().equals("FAILURE")) {
+        				count+=1;
+        				System.out.println(j+".  "+count);
+        			}
+        			
+        		}
+        		hashMap.put(job.getName(), count);
+        		count = 0;
+    		
+    		} catch (NullPointerException e) {
+    			System.out.println("Exeption "+e+": "+e.getMessage());
+	    	}
+    	}
+    	 try {
+			createServerFile(hashMap);
+		} catch (IOException e) {
+			System.out.println("Exeption "+e+": "+e.getMessage());
+		}
     }
 
     //создает таблицу для ГЛАВНОЙ страницы
@@ -129,96 +110,89 @@ public final class WidgetAction implements Action {
 	}
 	
 
+	//логика:
+		//получаем актуальный запрос
+		//в нем смотрим название джобы и номер билда
+		//из списка всех джоб находим запрошенную
+		//(потому что я не знаю, как получить объект Job другим способом)
+		//для нее запрашиваем информацию о конкретном билде
+	
 	//создает таблицу для страницы БИЛДА
 	public static String getBuildInfo() throws ClientProtocolException, IOException{
-		String apiJson = "api/json?pretty=true";
-        String temp = "";
-        String buildInf = doGet(Stapler.getCurrentRequest().getRequestURI() + apiJson);
-		//Stapler.getCurrentRequest().getRequestURI();
-		//возвращает строку типа этой 
-		// /job/ProjectName/5/
-		temp = Stapler.getCurrentRequest().getRequestURI();
-		if(temp.endsWith("/")) {temp=temp.substring(0, temp.length()-1);}
-	    int ind = temp.lastIndexOf("/"); 
-	   
-		ind = buildInf.indexOf("duration");
-	    temp = buildInf.substring(ind+12);
-	    ind = temp.indexOf(",");
-	    float buildDuration = Float.parseFloat(temp.substring(0,ind));
 		
-		ind = buildInf.indexOf("displayName");
-	    temp = buildInf.substring(ind+16);
-	    ind = temp.indexOf(",");
-	    String buildName = temp.substring(0, ind-1);
-	    
-	    ind = temp.indexOf("result");
-	    temp = temp.substring(ind+11);
-	    ind = temp.indexOf(",");
-	    String buildResult = temp.substring(0, ind-1);
-	    makeServerInfo();
-	    
-		return "<br><table border='1'> <tr> <td>Build`s name</td> <td>Build`s duration</td> <td>Result</td></tr><tr><td>"+buildName+"</td><td>"+buildDuration/1000+" секунд</td><td>"+buildResult+"</td></tr></table><br>";
+		//возвращает /job/Application%20framework/19/
+		String reqURL = Stapler.getCurrentRequest().getRequestURI();
+		reqURL = reqURL.substring(0, reqURL.length()-1);//убираем последний слэш /job/Application%20framework/19
+		String buildNumber = reqURL.substring(reqURL.lastIndexOf("/")+1);//19
+		reqURL = reqURL.substring(0, reqURL.lastIndexOf("/"));//убираем после последнего слэша /job/Application%20framework
+		String jobname = reqURL.substring(reqURL.lastIndexOf("/")+1);//убираем последний слэш Application%20framework
+
+    	while (jobname.contains("%20")){
+    		jobname = jobname.replace("%20", " ");//замена символов пробела на пробел
+    	}
+		
+    	Hudson hudson = Hudson.getInstance();
+    	
+    	List<Item> allJobs = hudson.getAllItems();//список всех джоб
+    	Job<?, ?> job = null;
+    	for (int i = 0; i < allJobs.size(); i++) {
+    		if (allJobs.get(i).getDisplayName().trim().equals(jobname.trim())){
+    			job = (Job<?, ?>) allJobs.get(i);
+    		}
+    	}
+    	if (job == null) {return "There is no such job" ; }
+    	else {
+	    	AbstractBuild<?, ?> build = (AbstractBuild<?, ?>) job.getBuildByNumber(Integer.parseInt(buildNumber));
+			
+	    	makeServerInfo();
+	    	return "<br><table border='1'> <tr> <td>Build`s name</td> <td>Build`s duration</td> <td>Result</td></tr><tr><td>"+build.getNumber()+"</td><td>"+ String.format("%.3f", (double) build.getDuration() * 0.001)  +" секунд</td><td>"+build.getResult()+"</td></tr></table><br>";
+    	}
+	
 	}
 	
+	//логика:
+	//получаем актуальный запрос
+	//в нем смотрим название джобы
+	//из списка всех джоб находим запрошенную
+	//(потому что я не знаю, как получить объект Job другим способом)
+	//для нее запрашиваем информацию о ее билдах
 	
-	//cоздает таблицу для страницы ПРОЕКТА
+	//cоздает таблицу для страницы ДЖОБЫ
     public String getJobInfo() {
-    	//его надо именно тут инициализировать
-    	HOST = Stapler.getCurrentRequest().getRootPath()+"/";
-    	    	
-    	String apiJson = "api/json?pretty=true";
-        String towrite = "</div><div style='float:align'><br><table border='1'> <tr> <td>Build`s name</td><td>Result</td></tr>";
-        try {
-			
-			//возвращает строку типа этой 
-			// /job/ProjectName/
-		    String zapros  = Stapler.getCurrentRequest().getRequestURI();
-			String temp = zapros;
-			if(temp.endsWith("/")) {temp=temp.substring(0, temp.length()-1);}
-		    int ind = temp.lastIndexOf("/"); 
-		   //ProjectName
-		    String projectName = temp.substring(ind+1);
-		    
-		    zapros = zapros + "lastBuild/";
-		    		
-		    String responseBody = doGet(zapros+apiJson);	
-		    ind = responseBody .indexOf("number");
-		    temp = responseBody.substring(ind+10);
-		    ind = temp.indexOf(",");
-		    int  buildNumber = Integer.parseInt(temp.substring(0,ind));
-		    String buildName = "";
-		    String buildResult = "";
-		    
-		    int  buildCounter = 0;
-		    if (buildNumber>5) buildCounter=5;
-		    else buildCounter = buildNumber;
-		    //System.out.println("номер buildCounter "+buildCounter);
-	    	for (int j = 0; j<buildCounter; j++) {
-				ind = responseBody.indexOf("displayName");
-			    temp = responseBody.substring(ind+16);
-			    ind = temp.indexOf(",");
-			    buildName = temp.substring(0, ind-1);
-			    ind = responseBody .indexOf("number");
-			    temp = responseBody.substring(ind+10);
-			    ind = temp.indexOf(",");
-			    buildNumber = Integer.parseInt(temp.substring(0,ind));
-			    ind = temp.indexOf("result");
-			    temp = temp.substring(ind+11);
-			    ind = temp.indexOf(",");
-			    buildResult = temp.substring(0, ind-1);
-			    towrite += "<tr><td>"+buildName+"</td><td>"+buildResult+"</td></tr>";
-			    buildNumber = buildNumber-1;
-			    //http://localhost:8080/job/ProjectName/6/api/json?pretty=true
-			    responseBody = doGet("job/" + projectName + "/" +buildNumber+"/"+apiJson);
-			}
+    	
+    	//получаем имя запрошенной джобы
+    	String reqURL = Stapler.getCurrentRequest().getRequestURI();//возвращает /job/Application%20framework/
+    	String jobname = reqURL.substring(0, reqURL.length()-1);//убираем последний слэш
+    	jobname = jobname.substring(jobname.lastIndexOf("/")+1);
+    	while (jobname.contains("%20")){
+    		jobname = jobname.replace("%20", " ");//замена символов пробела на пробел
+    	}
+    	Hudson hudson = Hudson.getInstance();
+    	
+    	List<Item> allJobs = hudson.getAllItems();
+    	Job<?, ?> job = null;
+    	for (int i = 0; i < allJobs.size(); i++) {
+    		if (allJobs.get(i).getDisplayName().trim().equals(jobname.trim())){
+    			job = (Job<?, ?>) allJobs.get(i);
+    		}
+    	}
+    	if (job == null) {return "There is no such job"; }
+    	else {
+    	
+	    	String towrite = "</div><div style='float:align'><br><table border='1'> <tr> <td>Build`s name</td><td>Result</td></tr>";
+	        
+	    	RunList<?> e = job.getBuilds();
+	    	int N;//константа количества отображаемых сборок
+	    	if (e.size()<NUMBER_OF_BUILDS_TO_DISPLAY_ON_JOB_PAGE) {N=e.size();}
+	    	else {N=NUMBER_OF_BUILDS_TO_DISPLAY_ON_JOB_PAGE;}
+	    	
+	    	for (int i = 0; i < N; i++) {
+	    		towrite += "<tr><td>"+e.get(i).getNumber()+"</td><td>"+e.get(i).getResult()+"</td></tr>";
+	    	}
 	    	towrite+="</table><br></div><div>";
-        }
-	    	catch(IOException e0) {
- 			   System.out.println(e0.toString());
- 			  return e0.getCause().toString();
- 		 }
-        makeServerInfo();
-		    return towrite;
+	    	
+	        makeServerInfo();
+			return towrite;
+    	}
     }	
-    
 }

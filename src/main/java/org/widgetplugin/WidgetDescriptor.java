@@ -12,6 +12,7 @@ public class WidgetDescriptor extends BuildStepDescriptor<Publisher> {
      * Constructs a {@link WidgetDescriptor}.
      */
     public WidgetDescriptor() {
+    	
         super(WidgetRecorder.class);
     }
 
